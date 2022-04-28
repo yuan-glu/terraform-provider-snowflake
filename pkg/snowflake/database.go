@@ -57,6 +57,25 @@ func (dsb *DatabaseCloneBuilder) Create() string {
 	return fmt.Sprintf(`CREATE DATABASE "%v" CLONE "%v"`, dsb.name, dsb.database)
 }
 
+// DatabaseReplicaBuilder is a basic builder that just creates databases from an avilable replication source
+type DatabaseReplicaBuilder struct {
+	name    string
+	replica string
+}
+
+// DatabaseFromReplica returns a pointer to a builder that can create a database from an avilable replication source
+func DatabaseFromReplica(name, replica string) *DatabaseReplicaBuilder {
+	return &DatabaseReplicaBuilder{
+		name:    name,
+		replica: replica,
+	}
+}
+
+// Create returns the SQL statement required to create a database from an avilable replication source
+func (dsb *DatabaseReplicaBuilder) Create() string {
+	return fmt.Sprintf(`CREATE DATABASE "%v" AS REPLICA OF "%v"`, dsb.name, dsb.replica)
+}
+
 type database struct {
 	CreatedOn     sql.NullString `db:"created_on"`
 	DBName        sql.NullString `db:"name"`
@@ -90,4 +109,28 @@ func ListDatabases(sdb *sqlx.DB) ([]database, error) {
 		return nil, nil
 	}
 	return dbs, errors.Wrapf(err, "unable to scan row for %s", stmt)
+}
+
+func ListDatabase(sdb *sqlx.DB, databaseName string) (*database, error) {
+	stmt := fmt.Sprintf("SHOW DATABASES LIKE '%s'", databaseName)
+	rows, err := sdb.Queryx(stmt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	dbs := []database{}
+	err = sqlx.StructScan(rows, &dbs)
+	if err == sql.ErrNoRows || len(dbs) == 0 {
+		log.Printf("[DEBUG] no databases found")
+		return nil, nil
+	}
+	db := &database{}
+	for _, d := range dbs {
+		if d.DBName.String == databaseName {
+			db = &d
+			break
+		}
+	}
+	return db, errors.Wrapf(err, "unable to scan row for %s", stmt)
 }

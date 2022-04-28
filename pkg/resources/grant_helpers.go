@@ -81,17 +81,19 @@ type grantID struct {
 	SchemaName   string
 	ObjectName   string
 	Privilege    string
+	Roles        []string
 	GrantOption  bool
 }
 
 // String() takes in a grantID object and returns a pipe-delimited string:
-// resourceName|schemaName|ObjectName|Privilege|GrantOption
+// resourceName|schemaName|ObjectName|Privilege|Roles|GrantOption
 func (gi *grantID) String() (string, error) {
 	var buf bytes.Buffer
 	csvWriter := csv.NewWriter(&buf)
 	csvWriter.Comma = grantIDDelimiter
 	grantOption := fmt.Sprintf("%v", gi.GrantOption)
-	dataIdentifiers := [][]string{{gi.ResourceName, gi.SchemaName, gi.ObjectName, gi.Privilege, grantOption}}
+	roles := strings.Join(gi.Roles, ",")
+	dataIdentifiers := [][]string{{gi.ResourceName, gi.SchemaName, gi.ObjectName, gi.Privilege, roles, grantOption}}
 	err := csvWriter.WriteAll(dataIdentifiers)
 	if err != nil {
 		return "", err
@@ -100,7 +102,7 @@ func (gi *grantID) String() (string, error) {
 	return strGrantID, nil
 }
 
-// grantIDFromString() takes in a pipe-delimited string: resourceName|schemaName|ObjectName|Privilege
+// grantIDFromString() takes in a pipe-delimited string: resourceName|schemaName|ObjectName|Privilege|Roles
 // and returns a grantID object
 func grantIDFromString(stringID string) (*grantID, error) {
 	reader := csv.NewReader(strings.NewReader(stringID))
@@ -113,20 +115,45 @@ func grantIDFromString(stringID string) (*grantID, error) {
 	if len(lines) != 1 {
 		return nil, fmt.Errorf("1 line per grant")
 	}
-	if len(lines[0]) != 4 && len(lines[0]) != 5 {
-		return nil, fmt.Errorf("4 or 5 fields allowed")
+
+	// Len 1 is allowing for legacy IDs where role names are not included
+	if len(lines[0]) < 1 || len(lines[0]) > 6 {
+		return nil, fmt.Errorf("1 to 6 fields allowed in ID")
 	}
 
+	// Splitting string list if new ID structure, will cause issues if roles names passed are "true" or "false".
+	// Checking for true/false to eliminate scenarios where it would pick up the grant option.
+	// Roles will be empty list if legacy IDs are used, roles from grants are not
+	// used in Read functions, just for uniqueness in IDs of resources
+	roles := []string{}
+	if len(lines[0]) > 4 && lines[0][4] != "true" && lines[0][4] != "false" {
+		roles = strings.Split(lines[0][4], ",")
+	}
+
+	// Allowing legacy IDs to check grant option
 	grantOption := false
-	if len(lines[0]) == 5 && lines[0][4] == "true" {
+	if len(lines[0]) == 6 && lines[0][5] == "true" {
 		grantOption = true
+	} else if len(lines[0]) == 5 && lines[0][4] == "true" {
+		grantOption = true
+	}
+
+	schemaName := ""
+	objectName := ""
+	privilege := ""
+
+	if len(lines[0]) > 3 {
+		schemaName = lines[0][1]
+		objectName = lines[0][2]
+		privilege = lines[0][3]
 	}
 
 	grantResult := &grantID{
 		ResourceName: lines[0][0],
-		SchemaName:   lines[0][1],
-		ObjectName:   lines[0][2],
-		Privilege:    lines[0][3],
+		SchemaName:   schemaName,
+		ObjectName:   objectName,
+		Privilege:    privilege,
+		Roles:        roles,
 		GrantOption:  grantOption,
 	}
 	return grantResult, nil
@@ -176,7 +203,7 @@ func createGenericGrant(d *schema.ResourceData, meta interface{}, builder snowfl
 func readGenericGrant(
 	d *schema.ResourceData,
 	meta interface{},
-	schema map[string]*schema.Schema,
+	grantSchema map[string]*schema.Schema,
 	builder snowflake.GrantBuilder,
 	futureObjects bool,
 	validPrivileges PrivilegeSet) error {
@@ -243,11 +270,16 @@ func readGenericGrant(
 		}
 	}
 
+	existingRoles := d.Get("roles").(*schema.Set)
+	multipleGrantFeatureFlag := d.Get("enable_multiple_grants").(bool)
 	var roles, shares []string
 	// Now see which roles have our privilege
 	for roleName, privileges := range rolePrivileges {
 		// Where priv is not all so it should match exactly
-		if privileges.hasString(priv) {
+		// Match to currently assigned roles or let everything through if no specific role grants
+		if privileges.hasString(priv) && !multipleGrantFeatureFlag {
+			roles = append(roles, roleName)
+		} else if privileges.hasString(priv) && (existingRoles.Contains(roleName) || existingRoles.Len() == 0) && multipleGrantFeatureFlag {
 			roles = append(roles, roleName)
 		}
 	}
@@ -269,7 +301,7 @@ func readGenericGrant(
 		return err
 	}
 
-	_, sharesOk := schema["shares"]
+	_, sharesOk := grantSchema["shares"]
 	if sharesOk && !futureObjects {
 		err = d.Set("shares", shares)
 		if err != nil {

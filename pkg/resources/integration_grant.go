@@ -39,6 +39,13 @@ var integrationGrantSchema = map[string]*schema.Schema{
 		Default:     false,
 		ForceNew:    true,
 	},
+	"enable_multiple_grants": {
+		Type:        schema.TypeBool,
+		Optional:    true,
+		Description: "When this is set to true, multiple grants of the same type can be created. This will cause Terraform to not revoke grants applied to roles and objects outside Terraform.",
+		Default:     false,
+		ForceNew:    true,
+	},
 }
 
 // IntegrationGrant returns a pointer to the resource representing a integration grant
@@ -63,6 +70,8 @@ func CreateIntegrationGrant(d *schema.ResourceData, meta interface{}) error {
 	w := d.Get("integration_name").(string)
 	priv := d.Get("privilege").(string)
 	grantOption := d.Get("with_grant_option").(bool)
+	roles := expandStringList(d.Get("roles").(*schema.Set).List())
+
 	builder := snowflake.IntegrationGrant(w)
 
 	err := createGenericGrant(d, meta, builder)
@@ -74,6 +83,7 @@ func CreateIntegrationGrant(d *schema.ResourceData, meta interface{}) error {
 		ResourceName: w,
 		Privilege:    priv,
 		GrantOption:  grantOption,
+		Roles:        roles,
 	}
 	dataIDInput, err := grant.String()
 	if err != nil {

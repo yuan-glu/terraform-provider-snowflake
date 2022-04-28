@@ -79,6 +79,12 @@ var schemaGrantSchema = map[string]*schema.Schema{
 		Default:     false,
 		ForceNew:    true,
 	},
+	"enable_multiple_grants": {
+		Type:        schema.TypeBool,
+		Optional:    true,
+		Description: "When this is set to true, multiple grants of the same type can be created. This will cause Terraform to not revoke grants applied to roles and objects outside Terraform.",
+		Default:     false,
+	},
 }
 
 // SchemaGrant returns a pointer to the resource representing a view grant
@@ -101,18 +107,19 @@ func SchemaGrant() *TerraformGrantResource {
 
 // CreateSchemaGrant implements schema.CreateFunc
 func CreateSchemaGrant(d *schema.ResourceData, meta interface{}) error {
-	var schema string
+	var schemaName string
 	if _, ok := d.GetOk("schema_name"); ok {
-		schema = d.Get("schema_name").(string)
+		schemaName = d.Get("schema_name").(string)
 	} else {
-		schema = ""
+		schemaName = ""
 	}
 	db := d.Get("database_name").(string)
 	priv := d.Get("privilege").(string)
 	onFuture := d.Get("on_future").(bool)
 	grantOption := d.Get("with_grant_option").(bool)
+	roles := expandStringList(d.Get("roles").(*schema.Set).List())
 
-	if (schema == "") && !onFuture {
+	if (schemaName == "") && !onFuture {
 		return errors.New("schema_name must be set unless on_future is true.")
 	}
 
@@ -120,7 +127,7 @@ func CreateSchemaGrant(d *schema.ResourceData, meta interface{}) error {
 	if onFuture {
 		builder = snowflake.FutureSchemaGrant(db)
 	} else {
-		builder = snowflake.SchemaGrant(db, schema)
+		builder = snowflake.SchemaGrant(db, schemaName)
 	}
 
 	err := createGenericGrant(d, meta, builder)
@@ -130,9 +137,10 @@ func CreateSchemaGrant(d *schema.ResourceData, meta interface{}) error {
 
 	grantID := &grantID{
 		ResourceName: db,
-		SchemaName:   schema,
+		SchemaName:   schemaName,
 		Privilege:    priv,
 		GrantOption:  grantOption,
+		Roles:        roles,
 	}
 	dataIDInput, err := grantID.String()
 	if err != nil {

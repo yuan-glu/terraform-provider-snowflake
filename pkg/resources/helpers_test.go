@@ -192,6 +192,22 @@ func roleGrants(t *testing.T, id string, params map[string]interface{}) *schema.
 	return d
 }
 
+func userOwnershipGrant(t *testing.T, id string, params map[string]interface{}) *schema.ResourceData {
+	r := require.New(t)
+	d := schema.TestResourceDataRaw(t, resources.UserOwnershipGrant().Schema, params)
+	r.NotNil(d)
+	d.SetId(id)
+	return d
+}
+
+func roleOwnershipGrant(t *testing.T, id string, params map[string]interface{}) *schema.ResourceData {
+	r := require.New(t)
+	d := schema.TestResourceDataRaw(t, resources.RoleOwnershipGrant().Schema, params)
+	r.NotNil(d)
+	d.SetId(id)
+	return d
+}
+
 func apiIntegration(t *testing.T, id string, params map[string]interface{}) *schema.ResourceData {
 	r := require.New(t)
 	d := schema.TestResourceDataRaw(t, resources.APIIntegration().Schema, params)
@@ -219,6 +235,14 @@ func scimIntegration(t *testing.T, id string, params map[string]interface{}) *sc
 func oauthIntegration(t *testing.T, id string, params map[string]interface{}) *schema.ResourceData {
 	r := require.New(t)
 	d := schema.TestResourceDataRaw(t, resources.OAuthIntegration().Schema, params)
+	r.NotNil(d)
+	d.SetId(id)
+	return d
+}
+
+func externalOauthIntegration(t *testing.T, id string, params map[string]interface{}) *schema.ResourceData {
+	r := require.New(t)
+	d := schema.TestResourceDataRaw(t, resources.ExternalOauthIntegration().Schema, params)
 	r.NotNil(d)
 	d.SetId(id)
 	return d
